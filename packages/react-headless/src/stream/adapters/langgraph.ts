@@ -78,12 +78,15 @@ export const langGraphAdapter = (options?: LangGraphAdapterOptions): StreamProto
     const decoder = new TextDecoder();
     let fallbackMessageId = crypto.randomUUID();
     let currentMessageId: string | null = null;
+    let lastAssistantMessageId: string | null = null;
     let currentGraphStep: number | undefined;
     const toolCallIdsByIndex = new Map<number, string>();
     const startedToolCallIds = new Set<string>();
     const openToolCallIds = new Set<string>();
     const toolCallArgsSeen = new Set<string>();
     let messageStarted = false;
+    let sawToolsOnCurrentMessage = false;
+    let postToolSplit = 0;
     let buffer = "";
 
     while (true) {
@@ -149,6 +152,7 @@ export const langGraphAdapter = (options?: LangGraphAdapterOptions): StreamProto
               }
               messageStarted = false;
               currentMessageId = null;
+              sawToolsOnCurrentMessage = false;
               currentGraphStep = undefined;
               fallbackMessageId = crypto.randomUUID();
               toolCallIdsByIndex.clear();
@@ -178,8 +182,22 @@ export const langGraphAdapter = (options?: LangGraphAdapterOptions): StreamProto
             if (graphStepChanged && nextMessageId === currentMessageId) {
               nextMessageId = `${nextMessageId}-step-${graphStep}`;
             }
+
+            const textContent = extractTextContent(msg.content);
+            // Text after tool calls is a new assistant item so commentary like
+            // "Let me do this" stays on the tool-bearing message and the answer
+            // text after it is not concatenated onto the same message. When the
+            // wire id repeats across that boundary it needs a fresh id too.
+            const splitAfterTools = !!textContent && sawToolsOnCurrentMessage && messageStarted;
+            if ((splitAfterTools || !messageStarted) && nextMessageId === lastAssistantMessageId) {
+              nextMessageId = `${nextMessageId}-post-tools-${++postToolSplit}`;
+            }
+
             const isNewModelStep =
-              !messageStarted || nextMessageId !== currentMessageId || graphStepChanged;
+              !messageStarted ||
+              nextMessageId !== currentMessageId ||
+              graphStepChanged ||
+              splitAfterTools;
 
             if (isNewModelStep) {
               if (messageStarted && currentMessageId) {
@@ -189,7 +207,9 @@ export const langGraphAdapter = (options?: LangGraphAdapterOptions): StreamProto
                 };
               }
               currentMessageId = nextMessageId;
+              lastAssistantMessageId = currentMessageId;
               currentGraphStep = graphStep;
+              sawToolsOnCurrentMessage = false;
               toolCallIdsByIndex.clear();
               yield {
                 type: EventType.TEXT_MESSAGE_START,
@@ -199,8 +219,6 @@ export const langGraphAdapter = (options?: LangGraphAdapterOptions): StreamProto
               messageStarted = true;
             }
 
-            // Handle text content
-            const textContent = extractTextContent(msg.content);
             if (textContent) {
               yield {
                 type: EventType.TEXT_MESSAGE_CONTENT,
@@ -220,6 +238,7 @@ export const langGraphAdapter = (options?: LangGraphAdapterOptions): StreamProto
                 if (toolCallId && !startedToolCallIds.has(toolCallId)) {
                   startedToolCallIds.add(toolCallId);
                   openToolCallIds.add(toolCallId);
+                  sawToolsOnCurrentMessage = true;
                   yield {
                     type: EventType.TOOL_CALL_START,
                     toolCallId,
@@ -252,6 +271,7 @@ export const langGraphAdapter = (options?: LangGraphAdapterOptions): StreamProto
                 if (!startedToolCallIds.has(toolCallId)) {
                   startedToolCallIds.add(toolCallId);
                   openToolCallIds.add(toolCallId);
+                  sawToolsOnCurrentMessage = true;
                   yield {
                     type: EventType.TOOL_CALL_START,
                     toolCallId,

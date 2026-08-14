@@ -105,6 +105,67 @@ describe("langGraphAdapter", () => {
       });
     });
 
+    it("splits text that follows tool calls onto a new AG-UI message", async () => {
+      const body =
+        sse("messages", [
+          {
+            type: "AIMessageChunk",
+            content: "Let me do this",
+            id: "msg-1",
+            tool_call_chunks: [{ id: "tc-1", name: "get_weather", args: "{}", index: 0 }],
+          },
+          { langgraph_node: "agent" },
+        ]) +
+        sse("messages", [
+          {
+            type: "AIMessageChunk",
+            content: "root = Card()",
+            id: "msg-1",
+          },
+          { langgraph_node: "agent" },
+        ]) +
+        sse("end", null);
+
+      const events = await collect(langGraphAdapter().parse(makeSSEResponse(body)));
+      const textEvents = events.filter(
+        (event: any) =>
+          event.type === EventType.TEXT_MESSAGE_START ||
+          event.type === EventType.TEXT_MESSAGE_CONTENT ||
+          event.type === EventType.TEXT_MESSAGE_END,
+      );
+
+      expect(textEvents).toEqual([
+        {
+          type: EventType.TEXT_MESSAGE_START,
+          messageId: "msg-1",
+          role: "assistant",
+        },
+        {
+          type: EventType.TEXT_MESSAGE_CONTENT,
+          messageId: "msg-1",
+          delta: "Let me do this",
+        },
+        {
+          type: EventType.TEXT_MESSAGE_END,
+          messageId: "msg-1",
+        },
+        {
+          type: EventType.TEXT_MESSAGE_START,
+          messageId: "msg-1-post-tools-1",
+          role: "assistant",
+        },
+        {
+          type: EventType.TEXT_MESSAGE_CONTENT,
+          messageId: "msg-1-post-tools-1",
+          delta: "root = Card()",
+        },
+        {
+          type: EventType.TEXT_MESSAGE_END,
+          messageId: "msg-1-post-tools-1",
+        },
+      ]);
+    });
+
     it("handles non-tuple message format (plain object)", async () => {
       const body =
         sse("messages", { type: "ai", content: "plain", id: "msg-1" }) + sse("end", null);
