@@ -151,17 +151,17 @@ describe("langGraphAdapter", () => {
         },
         {
           type: EventType.TEXT_MESSAGE_START,
-          messageId: "msg-1-post-tools-1",
+          messageId: "msg-1#1",
           role: "assistant",
         },
         {
           type: EventType.TEXT_MESSAGE_CONTENT,
-          messageId: "msg-1-post-tools-1",
+          messageId: "msg-1#1",
           delta: "root = Card()",
         },
         {
           type: EventType.TEXT_MESSAGE_END,
-          messageId: "msg-1-post-tools-1",
+          messageId: "msg-1#1",
         },
       ]);
     });

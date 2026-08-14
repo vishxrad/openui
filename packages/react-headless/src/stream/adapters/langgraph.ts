@@ -78,15 +78,17 @@ export const langGraphAdapter = (options?: LangGraphAdapterOptions): StreamProto
     const decoder = new TextDecoder();
     let fallbackMessageId = crypto.randomUUID();
     let currentMessageId: string | null = null;
-    let lastAssistantMessageId: string | null = null;
     let currentGraphStep: number | undefined;
     const toolCallIdsByIndex = new Map<number, string>();
     const startedToolCallIds = new Set<string>();
     const openToolCallIds = new Set<string>();
     const toolCallArgsSeen = new Set<string>();
+    // Every id already spent on an assistant segment, so a repeated wire id can
+    // be given a distinct one (see the segment-opening branch below).
+    const usedMessageIds = new Set<string>();
+    let duplicateMessageIds = 0;
     let messageStarted = false;
     let sawToolsOnCurrentMessage = false;
-    let postToolSplit = 0;
     let buffer = "";
 
     while (true) {
@@ -179,25 +181,27 @@ export const langGraphAdapter = (options?: LangGraphAdapterOptions): StreamProto
             let nextMessageId =
               msg.id ??
               (graphStep === undefined ? fallbackMessageId : `langgraph-step-${graphStep}`);
-            if (graphStepChanged && nextMessageId === currentMessageId) {
-              nextMessageId = `${nextMessageId}-step-${graphStep}`;
-            }
 
             const textContent = extractTextContent(msg.content);
             // Text after tool calls is a new assistant item so commentary like
             // "Let me do this" stays on the tool-bearing message and the answer
-            // text after it is not concatenated onto the same message. When the
-            // wire id repeats across that boundary it needs a fresh id too.
+            // text after it is not concatenated onto the same message.
             const splitAfterTools = !!textContent && sawToolsOnCurrentMessage && messageStarted;
-            if ((splitAfterTools || !messageStarted) && nextMessageId === lastAssistantMessageId) {
-              nextMessageId = `${nextMessageId}-post-tools-${++postToolSplit}`;
-            }
 
             const isNewModelStep =
               !messageStarted ||
               nextMessageId !== currentMessageId ||
               graphStepChanged ||
               splitAfterTools;
+
+            // LangGraph repeats a wire id across segment boundaries — both when
+            // the graph step advances and after a tool call — so an id already
+            // spent on a closed segment needs a fresh one for consumers to keep
+            // both. Only when opening a segment: mid-message chunks must keep
+            // streaming into currentMessageId.
+            if (isNewModelStep && usedMessageIds.has(nextMessageId)) {
+              nextMessageId = `${nextMessageId}#${++duplicateMessageIds}`;
+            }
 
             if (isNewModelStep) {
               if (messageStarted && currentMessageId) {
@@ -207,7 +211,7 @@ export const langGraphAdapter = (options?: LangGraphAdapterOptions): StreamProto
                 };
               }
               currentMessageId = nextMessageId;
-              lastAssistantMessageId = currentMessageId;
+              usedMessageIds.add(nextMessageId);
               currentGraphStep = graphStep;
               sawToolsOnCurrentMessage = false;
               toolCallIdsByIndex.clear();

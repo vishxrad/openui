@@ -90,9 +90,11 @@ export const vercelAIAdapter = (): StreamProtocolAdapter => ({
           stepName: string;
           messageId?: string;
           messageStarted: boolean;
+          // Per-step, so a new step resets it without an explicit assignment.
+          // Only ever read while a step message is open (see beginText).
+          sawTools: boolean;
         }
       | undefined;
-    let sawToolsOnCurrentMessage = false;
 
     const startStepMessage = (preferredMessageId?: string): AGUIEvent | undefined => {
       if (!activeStep || activeStep.messageStarted) return;
@@ -106,21 +108,27 @@ export const vercelAIAdapter = (): StreamProtocolAdapter => ({
       };
     };
 
+    // Single entry point for "a text chunk arrived": opens the step's message,
+    // or closes it and opens a new one when the text follows tool calls.
+    //
     // Text that follows tool calls is a new assistant item: commentary like
     // "Let me do this" stays on the tool-bearing message and the answer text
     // after it gets its own message id, so a consumer splitting on
     // TEXT_MESSAGE_START keeps both. Streams without `start-step` already give
     // each text part a distinct id, so only the step-scoped message needs this.
-    const splitTextAfterTools = (partId: string): AGUIEvent[] => {
-      if (!activeStep?.messageStarted || !sawToolsOnCurrentMessage) return [];
+    const beginText = (partId: string): AGUIEvent[] => {
+      if (activeStep?.messageStarted && activeStep.sawTools) {
+        const previousId = activeStep.messageId!;
+        activeStep.messageId = partId;
+        activeStep.sawTools = false;
+        return [
+          { type: EventType.TEXT_MESSAGE_END, messageId: previousId },
+          { type: EventType.TEXT_MESSAGE_START, messageId: partId, role: "assistant" },
+        ];
+      }
 
-      const previousId = activeStep.messageId!;
-      activeStep.messageId = partId;
-      sawToolsOnCurrentMessage = false;
-      return [
-        { type: EventType.TEXT_MESSAGE_END, messageId: previousId },
-        { type: EventType.TEXT_MESSAGE_START, messageId: partId, role: "assistant" },
-      ];
+      const event = startStepMessage(partId);
+      return event ? [event] : [];
     };
 
     const toolParent = () =>
@@ -134,8 +142,7 @@ export const vercelAIAdapter = (): StreamProtocolAdapter => ({
       switch (chunk.type) {
         case "start-step": {
           const stepName = `vercel-ai-step-${++stepIndex}`;
-          activeStep = { stepName, messageStarted: false };
-          sawToolsOnCurrentMessage = false;
+          activeStep = { stepName, messageStarted: false, sawTools: false };
           yield {
             type: EventType.STEP_STARTED,
             stepName,
@@ -160,9 +167,7 @@ export const vercelAIAdapter = (): StreamProtocolAdapter => ({
         }
 
         case "text-start": {
-          for (const event of splitTextAfterTools(chunk.id)) yield event;
-          const event = startStepMessage(chunk.id);
-          if (event) yield event;
+          for (const event of beginText(chunk.id)) yield event;
           if (!activeStep) {
             yield {
               type: EventType.TEXT_MESSAGE_START,
@@ -174,9 +179,7 @@ export const vercelAIAdapter = (): StreamProtocolAdapter => ({
         }
 
         case "text-delta": {
-          for (const event of splitTextAfterTools(chunk.id)) yield event;
-          const event = startStepMessage(chunk.id);
-          if (event) yield event;
+          for (const event of beginText(chunk.id)) yield event;
           yield {
             type: EventType.TEXT_MESSAGE_CONTENT,
             messageId: activeStep?.messageId ?? chunk.id,
@@ -199,7 +202,7 @@ export const vercelAIAdapter = (): StreamProtocolAdapter => ({
             const event = startStepMessage();
             if (event) yield event;
             startedTools.add(chunk.toolCallId);
-            sawToolsOnCurrentMessage = true;
+            if (activeStep) activeStep.sawTools = true;
             yield {
               type: EventType.TOOL_CALL_START,
               toolCallId: chunk.toolCallId,
@@ -226,7 +229,7 @@ export const vercelAIAdapter = (): StreamProtocolAdapter => ({
             const event = startStepMessage();
             if (event) yield event;
             startedTools.add(chunk.toolCallId);
-            sawToolsOnCurrentMessage = true;
+            if (activeStep) activeStep.sawTools = true;
             yield {
               type: EventType.TOOL_CALL_START,
               toolCallId: chunk.toolCallId,
