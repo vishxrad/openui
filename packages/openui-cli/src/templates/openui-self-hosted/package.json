@@ -18,14 +18,14 @@
   },
   "dependencies": {
     "@openuidev/lang-core": "0.2.12",
-    "@openuidev/react-ui": "^0.13.6",
+    "@openuidev/react-ui": "^0.13.7",
     "next": "^16.3.0",
     "openai": "^6.49.0",
     "react": "19.2.3",
     "react-dom": "19.2.3"
   },
   "devDependencies": {
-    "@openuidev/devtools": "^0.0.5",
+    "@openuidev/devtools": "^0.0.6",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

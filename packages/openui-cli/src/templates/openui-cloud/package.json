@@ -12,7 +12,7 @@
   "dependencies": {
     "@openuidev/lang-core": "0.2.12",
     "@openuidev/react-lang": "^0.2.11",
-    "@openuidev/react-ui": "^0.13.6",
+    "@openuidev/react-ui": "^0.13.7",
     "@openuidev/thesys": "^0.3.2",
     "@openuidev/thesys-server": "0.1.3",
     "lucide-react": "^0.575.0",
@@ -24,7 +24,7 @@
     "zustand": "^4.5.5"
   },
   "devDependencies": {
-    "@openuidev/devtools": "^0.0.5",
+    "@openuidev/devtools": "^0.0.6",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
